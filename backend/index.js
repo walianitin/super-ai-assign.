@@ -3,9 +3,10 @@ const app= express();
 const  port= 3000;
 import  duckdb from "@duckdb/node-api";
 import  cors from "cors";
-import  {DuckDBInstance } from "@duckdb/node-api";
+import  {DuckDBInstance, DuckDBMaterializedResult } from "@duckdb/node-api";
 import OpenAI from 'openai';
-import e from "express";
+import { nativeEnum } from "zod";
+// import e from "express";
 app.use(cors());
 app.use(express.json());
 const instance = await DuckDBInstance.create('my_duckdb.db');
@@ -14,7 +15,7 @@ let connection= await instance.connect();
 app.get("/", (req, res) => {
     res.send("Hello World!");
 })
-
+//working
 app.post("/create_table",async (req,res)=>{
     const name_table=req.body?.name;
     try{
@@ -22,16 +23,8 @@ app.post("/create_table",async (req,res)=>{
             country STRING,
             date STRING,
             total_cases INTEGER,
-            new_cases INTEGER,
-            total_deaths INTEGER,
-            new_deaths INTEGER,
-            vaccinations INTEGER
+          
         )`)
-        await connection.run(`INSERT INTO ${name_table} (country, date, total_cases, new_cases, total_deaths, new_deaths, vaccinations)
-        VALUES
-            ('India', '2025-01-01', 35000000, 100000, 450000, 1200, 90000000),
-            ('India', '2025-01-02', 35150000, 150000, 451200, 1300, 91000000);
-        `)
         res.json({message:"Table created successfully",name_table} );
     }catch(err){
         console.log(err.message,"error while creating table");
@@ -41,16 +34,42 @@ app.post("/create_table",async (req,res)=>{
     }
 })
 
+//this test api check wherther the data is being added after passing to the the "create_table" api
+// app.post("/test__for_adding_data", (req, res) => {
+
+//         const {name,country,data,total_cases} = req?.body;
+//         try{
+
+//             connection.run(
+//                 `INSERT INTO ${name} VALUES (${
+//                     country
+//                     }, '${data}', '${total_cases}')`
+//                 );
+                
+//                 res.json("Success added data");
+//     }catch(err){
+//         res.json({message:err.message})
+//     }
+//       }
+//   );
+//   //# above api worked
+
+
+
 app.post("/show_table", async (req,res)=>{
     const name_table=req.body?.name;
     try{
+      const result_table= await connection.run (
+            `SELECT COUNT(*)
+             FROM ${name_table}`,
+          );
 
-        const result= await connection.run(`SELECT * FROM ${name_table}`);
-
-        res.json({message:"table fetched succefully"
-                ,name_table
-                ,data:result
-            })
+//       this results into  //{
+//     "message": {
+//         "result": {}
+//     }
+// }
+          res.json({message:result_table})
     }
     catch(err){
         console.log(err.message,"error while showing table");
@@ -58,26 +77,17 @@ app.post("/show_table", async (req,res)=>{
     }  
 })
 
+
 app.post("/insert_data",async (req,res)=>{
     
-    const {name_table,country,data,total_cases,new_cases,total_deaths,new_deaths,vaccinations}=req.body;
+    const {name,country,data,total_cases}=req.body?.data;
     try{
-        const tableExists = await connection.run(
-            `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
-            [name_table]
-        );
-
-        if (!tableExists) {
-            return res.json("Table not found/enter correct table name");
-        }
-
-       const result= await connection.run(
-        `INSERT INTO ${name_table} (country, date, total_cases, new_cases, total_deaths, new_deaths, vaccinations) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`, 
-        [country, data, total_cases, new_cases, total_deaths, new_deaths, vaccinations]
-    );
-  
-        res.json({message:`Data inserted successfully ${table_name}`});
+       await connection.run(
+            `INSERT INTO ${name} VALUES (${
+                country
+                }, '${data}','${total_cases}')`
+            );
+        res.json({message:`Data inserted successfully  to ${name}`});
     }
     catch(err){
         console.log(err.message,"error while inserting data");
@@ -87,13 +97,12 @@ app.post("/insert_data",async (req,res)=>{
     }
 })
 
+//not worker   "message": "Data not deleted successfully",
+    // "error": "table is not defined"\
+
 app.post("/delete_data",async (req,res)=>{
     const {country,table_name}=req?.body?.data;
-    const table= await connection.run(`Find table ${table_name}`);
-    if(!table){
-        res.json("Table not found/enter correct table name");
-    }
-
+   
     try{
         await connection.run(`DELETE FROM ${table} WHERE country=?`,[country]);
         res.json(`Data deleted successfully from ${table_name}, ${country}`);
@@ -105,23 +114,20 @@ app.post("/delete_data",async (req,res)=>{
         );
     }
 })
-
-app.put("/updata_data",async (req,res)=>{
-    const {table_name,country,data,total_cases,new_cases,total_deaths,new_deaths,vaccinations}=req?.body?.data;
-    const table= await connection.run(`Find table ${table_name}`);  
-    if(!table){
-        res.json("Table not found/enter correct table name");
-    }
-
+// "error": "Invalid Input Error: Expected 4 parameters, but none were supplied"
+app.put("/update_data",async (req,res)=>{
+    const {table_name,country,data,total_cases}=req.body;
+   
    try{
-    await connection.run(`UPDATE covid_data SET country=?,date=?,total_cases=?,new_cases=?,total_deaths=?,new_deaths=?,vaccinations=? WHERE country=?`,[country,data,total_cases,new_cases,total_deaths,new_deaths,vaccinations,country]);
+    await connection.run(`UPDATE ${table_name} SET 
+        ${country},${data},${total_cases}`);
     res.json("Data updated successfully");
    }
     catch(error){
          console.log(error.message,"error while updating data");
          res.json({message:"Data not updated",
             error:error.message}
-         ); // Add closing parenthesis
+         );
     }
 })
 
@@ -154,12 +160,13 @@ async function textToSQL(query) {
 app.post("/convert-text-to-sql", async (req, res) => {
     const  query  = req.body?.query; // Get the natural language query from the request body
     try {
-      const sqlQuery = await textToSQL(query); // Convert to SQL query
-      res.status(200).json({ sqlQuery});
+        const sqlQuery = await textToSQL(query); // Convert to SQL query
+        res.status(200).json({ sqlQuery});
     } catch (error) {
-      res.status(500).json({ message: "Failed to generate SQL query", details: error.message });
+        res.status(500).json({ message: "Failed to generate SQL query", details: error.message });
     }
-  });
+});
+//# result = dont have  acces to the gpt models
 app.listen(port, () => {
   console.log(`Example app listening at http://localhost:${port}`);
 }
